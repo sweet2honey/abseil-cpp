@@ -235,6 +235,7 @@ struct default_allocator_is_nothrow : std::false_type {};
 #endif
 
 namespace memory_internal {
+//* 当构造元素时，如果某个位置抛出异常，已经成功构造的元素需要被销毁，否则会造成资源泄漏。
 template <typename Allocator, typename Iterator, typename... Args>
 void ConstructRange(Allocator& alloc, Iterator first, Iterator last,
                     const Args&... args) {

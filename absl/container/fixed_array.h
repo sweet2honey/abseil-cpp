@@ -53,6 +53,63 @@
 #include "absl/hash/internal/weakly_mixed_integer.h"
 #include "absl/memory/memory.h"
 
+//* Take aways from FixedArray implementation:
+// 1. 编译期判断
+// conditional_t<condition, TypeA, TypeB>
+// constexpr auto kSentinel = -1;  // 用哨兵表示"默认"
+
+// 2. 空间优化
+// CompressedTuple<T1, T2, ...>  // 自动 EBO
+
+// 3. 两层架构
+// InlinedStorage { /* 物理 */ }
+// Storage : InlinedStorage { /* 逻辑 */ }
+
+// 4. 异常安全（RAII）
+// Storage 成员先初始化: storage_(n, a) { ... }
+// ConstructRange 内部也捕获异常，回滚已构造元素
+
+// 5. 类型包装（处理数组类型的合法性）
+// 问题：FixedArray<int[5]> 的 value_type 是数组，直接转换会误导编译器
+// 解决：包装器结构体 StorageElementWrapper<OuterT>
+//       - 内部：InnerT array[InnerN]（OuterT 剥掉最外层数组）
+//       - sizeof/alignof 保持不变（static_assert 验证）
+//       - 编译器诊断工具正确识别为"数组数组"而非"指针"
+// 转换：AsValueType() 专项处理，返回 &wrapper.array
+
+// 6. 分配器独立
+// AllocatorTraits::allocate/deallocate/construct/destroy
+
+//* FixedArray 的内存使用特点：
+// 1. **256 字节一定会存在**（除非显式 `N=0`）
+// 2. **存在两种使用方式**：
+//    - 装数据（小数组）
+//    - 被浪费（大数组或空数组，指针指向堆）
+// 3. **这是一个权衡**：
+//    - 小数组快（无堆分配）
+//    - 大数组会浪费 256 字节栈空间
+
+//* 小数组
+// 栈帧
+// ├─ redzone_begin_          ← 安全边界
+// ├─ buff_[256]              ← 40 字节实际使用
+// │  ├─ int[0] = ？
+// │  ├─ int[1] = ？
+// │  └─ int[9] = ？
+// ├─ redzone_end_            ← 安全边界
+// ├─ size_alloc_ = (10, allocator)
+// └─ data_ = &buff_[0]       ← 指向栈缓冲区
+
+//* 大数组
+// 栈帧
+// ├─ size_alloc_ = (1000, allocator)
+// └─ data_ ─────┐
+//               ↓
+//             堆内存
+//             ├─ int[0]
+//             ├─ int[1]
+//             └─ int[999]
+
 namespace absl {
 ABSL_NAMESPACE_BEGIN
 
@@ -69,12 +126,14 @@ constexpr static auto kFixedArrayUseDefault = static_cast<size_t>(-1);
 // automatically determine the number of elements to store inline based on
 // `sizeof(T)`. If `N` is specified, the `FixedArray` implementation will use
 // inline storage for arrays with a length <= `N`.
+//* 根据 sizeof(T) 来决定内联存储的元素个数
 //
 // Note that a `FixedArray` constructed with a `size_type` argument will
 // default-initialize its values by leaving trivially constructible types
 // uninitialized (e.g. int, int[4], double), and others default-constructed.
 // This matches the behavior of c-style arrays and `std::array`, but not
 // `std::vector`.
+//* 与 c-array 和 std::array 行为一致，避免不必要的初始化开销
 template <typename T, size_t N = kFixedArrayUseDefault,
           typename A = std::allocator<T>>
 class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
@@ -113,6 +172,7 @@ class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
   using reverse_iterator = std::reverse_iterator<iterator>;
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
+  //* 计算内联存储的元素个数： 默认情况下，使用 256 字节除以元素大小计算
   static constexpr size_type inline_elements =
       (N == kFixedArrayUseDefault ? kInlineBytesDefault / sizeof(value_type)
                                   : static_cast<size_type>(N));
@@ -138,6 +198,7 @@ class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
   // Note that trivially constructible elements will be uninitialized.
   explicit FixedArray(size_type n, const allocator_type& a = allocator_type())
       : storage_(n, a) {
+    //* 仅当默认构造函数非平凡时才进行构造
     if (DefaultConstructorIsNonTrivial()) {
       memory_internal::ConstructRange(storage_.alloc(), storage_.begin(),
                                       storage_.end());
@@ -148,6 +209,7 @@ class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
   FixedArray(size_type n, const value_type& val,
              const allocator_type& a = allocator_type())
       : storage_(n, a) {
+    //* 无条件地执行构造
     memory_internal::ConstructRange(storage_.alloc(), storage_.begin(),
                                     storage_.end(), val);
   }
@@ -417,6 +479,7 @@ class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
   template <typename OuterT, typename InnerT = absl::remove_extent_t<OuterT>,
             size_t InnerN = std::extent<OuterT>::value>
   struct StorageElementWrapper {
+    //* 剥掉最外一层的数组，平铺
     InnerT array[InnerN];
   };
 
@@ -445,6 +508,8 @@ class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
 
    private:
     ABSL_ADDRESS_SANITIZER_REDZONE(redzone_begin_);
+    //* 栈上的固定缓冲区，（默认）大小≤ 256 字节
+    //! 对齐到 StorageElement 类型的对齐要求，所以可以用 reinterpret_cast 转换
     alignas(StorageElement) unsigned char buff_[sizeof(
         StorageElement[inline_elements])];
     ABSL_ADDRESS_SANITIZER_REDZONE(redzone_end_);
@@ -500,15 +565,18 @@ class ABSL_ATTRIBUTE_WARN_UNUSED FixedArray {
 #endif  // ABSL_HAVE_ADDRESS_SANITIZER
     StorageElement* InitializeData() {
       if (UsingInlinedStorage(size())) {
+        //* 小数组，内联存储
         InlinedStorage::AnnotateConstruct(size());
         return InlinedStorage::data();
       } else {
+        //* 大数组，堆分配
         return reinterpret_cast<StorageElement*>(
             AllocatorTraits::allocate(alloc(), size()));
       }
     }
 
     // `CompressedTuple` takes advantage of EBCO for stateless `allocator_type`s
+    //! 如果 allocator_type 是空类，则不会占用额外空间，仅需要 size_type 大小的空间
     container_internal::CompressedTuple<size_type, allocator_type> size_alloc_;
     StorageElement* data_;
   };
