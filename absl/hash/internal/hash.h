@@ -677,9 +677,9 @@ H AbslHashValue(H hash_state, std::basic_string_view<Char> str) {
 
 // Support std::filesystem::path. The SFINAE is required because some string
 // types are implicitly convertible to std::filesystem::path.
-template <typename Path, typename H,
-          typename = absl::enable_if_t<
-              std::is_same_v<Path, std::filesystem::path>>>
+template <
+    typename Path, typename H,
+    typename = absl::enable_if_t<std::is_same_v<Path, std::filesystem::path>>>
 H AbslHashValue(H hash_state, const Path& path) {
   // This is implemented by deferring to the standard library to compute the
   // hash.  The standard library requires that for two paths, `p1 == p2`, then
@@ -1229,6 +1229,8 @@ inline uint64_t CombineContiguousImpl(
 #define ABSL_HASH_INTERNAL_SUPPORT_LEGACY_HASH_ 0
 #endif
 
+//*! [TRICK] 路由到最符合的类型特性，来决定如何哈希这个类型
+//* `Invoke(H state, const T& value)` 就是接口
 // Type trait to select the appropriate hash implementation to use.
 // HashSelect::type<T> will give the proper hash implementation, to be invoked
 // as:
@@ -1487,6 +1489,7 @@ template <typename T>
 struct Hash
     : absl::conditional_t<is_hashable<T>::value, HashImpl<T>, PoisonedHash> {};
 
+//* 保证按顺序哈希，通过 HashSelect::Apply<T>::Invoke 来路由到最符合的操作
 template <typename H>
 template <typename T, typename... Ts>
 H HashStateBase<H>::combine(H state, const T& value, const Ts&... values) {

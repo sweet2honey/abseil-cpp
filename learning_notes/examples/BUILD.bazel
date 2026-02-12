@@ -1,0 +1,58 @@
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load(
+	"//absl:copts/configure_copts.bzl",
+	"ABSL_DEFAULT_COPTS",
+	"ABSL_DEFAULT_LINKOPTS",
+)
+
+package(
+	default_visibility = ["//visibility:public"],
+	features = [
+		"header_modules",
+		"layering_check",
+		"parse_headers",
+	],
+)
+
+licenses(["notice"])
+
+cc_binary(
+	name = "hash_ex01",
+	srcs = ["hash_ex01.cc"],
+	copts = ABSL_DEFAULT_COPTS,
+	linkopts = ABSL_DEFAULT_LINKOPTS,
+	deps = [
+		"//absl/hash:hash",
+	],
+)
+
+cc_binary(
+	name = "hash_ex02",
+	srcs = ["hash_ex02.cc"],
+	copts = ABSL_DEFAULT_COPTS,
+	linkopts = ABSL_DEFAULT_LINKOPTS,
+	deps = [
+		"//absl/hash:hash",
+	],
+)
+
+cc_binary(
+	name = "hash_ex03",
+	srcs = ["hash_ex03.cc"],
+	copts = ABSL_DEFAULT_COPTS,
+	linkopts = ABSL_DEFAULT_LINKOPTS,
+	deps = [
+		"//absl/hash:hash",
+	],
+)
+
+cc_binary(
+	name = "hash_ex04",
+	srcs = ["hash_ex04.cc"],
+	copts = ABSL_DEFAULT_COPTS,
+	linkopts = ABSL_DEFAULT_LINKOPTS,
+	deps = [
+		"//absl/hash:hash",
+	],
+)

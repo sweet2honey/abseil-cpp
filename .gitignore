@@ -17,3 +17,5 @@ CMakeLists.txt.user
 copts/__pycache__/
 
 .cache
+
+compile_commands.json

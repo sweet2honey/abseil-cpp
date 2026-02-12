@@ -22,6 +22,7 @@
 //   * The `absl::Hash` functor, which is used to invoke the hasher within the
 //     Abseil hashing framework. `absl::Hash<T>` supports most basic types and
 //     a number of Abseil types out of the box.
+//* 定制点是 `AbslHashValue` 函数重载
 //   * `AbslHashValue`, an extension point that allows you to extend types to
 //     support Abseil hashing without requiring you to define a hashing
 //     algorithm.
@@ -36,10 +37,12 @@
 // framework by simply combining its state with the state of known, hashable
 // types. Hashing of that combined state is separately done by `absl::Hash`.
 //
+//*! 跨进程不稳定：哈希算法在不同进程里面不一样
 // One should assume that a hash algorithm is chosen randomly at the start of
 // each process.  E.g., `absl::Hash<int>{}(9)` in one process and
 // `absl::Hash<int>{}(9)` in another process are likely to differ.
 //
+//*! 跨动态库不稳定
 // `absl::Hash` may also produce different values from different dynamically
 // loaded libraries. For this reason, `absl::Hash` values must never cross
 // boundaries in dynamically loaded libraries (including when used in types like
@@ -152,7 +155,8 @@ ABSL_NAMESPACE_BEGIN
 // absl::Hash Invocation Evaluation
 // -----------------------------------------------------------------------------
 //
-// When invoked, `absl::Hash<T>` searches for supplied hash functions in the
+//* `absl::Hash<T>` 寻找哈希函数的顺序：原生支持类型、有 `AbslHashValue()` 重载方法、`std::hash<T>` 特化类型
+//  When invoked, `absl::Hash<T>` searches for supplied hash functions in the
 // following order:
 //
 //   * Natively supported types out of the box (see above)
@@ -182,6 +186,7 @@ ABSL_NAMESPACE_BEGIN
 //   that are otherwise difficult to extend using `AbslHashValue()`. (See the
 //   `HashState` class below.)
 //
+//* `hash state` 概念包含三个混合哈希状态的成员函数
 // The "hash state" concept contains three member functions for mixing hash
 // state:
 //
@@ -197,6 +202,7 @@ ABSL_NAMESPACE_BEGIN
 //
 //     state = H::combine(std::move(state), value1, value2, value3);
 //
+//* 跟按序哈希结果一致
 //   must be guaranteed to produce the same hash expansion as
 //
 //     state = H::combine(std::move(state), value1);
@@ -213,6 +219,7 @@ ABSL_NAMESPACE_BEGIN
 //
 //      state = H::combine_contiguous(std::move(state), data, size);
 //
+//! 不保证与 for-loop 的哈希值相同
 //    need NOT be guaranteed to produce the same hash expansion as a loop
 //    (it may perform internal optimizations). If you need this guarantee, use a
 //    loop instead.
@@ -223,6 +230,7 @@ ABSL_NAMESPACE_BEGIN
 //    state, returning the updated state.  Note that the existing hash
 //    state is move-only and must be passed by value.
 //
+//* 与元素顺序无关
 //    Unlike the other two methods, the hashing is order-independent.
 //    This can be used to hash unordered collections.
 //
@@ -241,6 +249,7 @@ ABSL_NAMESPACE_BEGIN
 //     return H::combine(std::move(state), v.field1, ..., v.fieldN);
 //   }
 //
+//*! 与 `operator==` 使用的成员一致
 // where `(field1, ..., fieldN)` are the members you would use on your
 // `operator==` to define equality.
 //
@@ -269,6 +278,7 @@ using Hash = absl::hash_internal::Hash<T>;
 // The requirement that the arguments match in both type and value is critical.
 // It means that `a == b` does not necessarily imply `HashOf(a) == HashOf(b)` if
 // `a` and `b` have different types. For example, `HashOf(2) != HashOf(2.0)`.
+//*! [TRICK] 没办法提供 int 类型引用作为模板参数，所以强制 Types 必须是推导出来的
 template <int&... ExplicitArgumentBarrier, typename... Types>
 size_t HashOf(const Types&... values) {
   auto tuple = std::tie(values...);
@@ -425,8 +435,8 @@ class HashState : public hash_internal::HashStateBase<HashState> {
     // are the same type.  This isn't true in the SpyHash case, but SpyHash
     // types are move-convertible to each other, so this still works.
     T& real_state = state.Real<T>();
-    real_state = T::RunCombineUnordered(
-        std::move(real_state), CombineUnorderedInvoker<HashState>{f});
+    real_state = T::RunCombineUnordered(std::move(real_state),
+                                        CombineUnorderedInvoker<HashState>{f});
     return state;
   }
 
